@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GyroRecorder</string>
+    <string name="desc">ARCore pose + full-rate gyro/accel, labelled by scenario for sensor Pantheon runs.</string>
+    <string name="record">Record</string>
+    <string name="stop">Stop</string>
+    <string name="mark">Mark</string>
+    <string name="share_last">Share last</string>
+    <string name="notes_hint">Notes (scene, zoom, lens…)</string>
+    <string name="idle_status">Idle — pick a scenario, tap Record.</string>
+    <string name="status_dot">●</string>
+    <string name="timer_zero">00:00</string>
+    <string name="timer_format">%02d:%02d</string>
+    <string name="stats_recording">frames %1$d · %2$.0f Hz   gyro %3$d · %4$.0f Hz   accel %5$d\n|ω| %6$.2f rad/s   tracking %7$s</string>
+    <string name="stats_idle">Sessions: Android/data/%1$s/files/Pantheon/</string>
+</resources>

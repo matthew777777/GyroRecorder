@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Full-rate gyro/accel (API 31+); recorder falls back to game rate without it.
+         The >200 Hz rate is the entire purpose of this util, hence the suppression. -->
+    <uses-permission
+        android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS"
+        tools:ignore="HighSamplingRate" />
+
+    <uses-feature android:name="android.hardware.camera.any" />
+    <!-- Optional: on non-ARCore devices the app still records IMU-only sessions. -->
+    <uses-feature
+        android:name="android.hardware.camera.ar"
+        android:required="false" />
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@android:drawable/ic_menu_camera"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.GyroRecorder">
+
+        <!-- "optional" = installable without ARCore; availability is checked at runtime. -->
+        <meta-data
+            android:name="com.google.ar.core"
+            android:value="optional" />
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            tools:ignore="DiscouragedApi,LockedOrientationActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>
