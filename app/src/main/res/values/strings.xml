@@ -13,4 +13,8 @@
     <string name="timer_format">%02d:%02d</string>
     <string name="stats_recording">frames %1$d · %2$.0f Hz   gyro %3$d · %4$.0f Hz   accel %5$d\n|ω| %6$.2f rad/s   tracking %7$s</string>
     <string name="stats_idle">Sessions: Android/data/%1$s/files/Pantheon/</string>
+    <string name="hud_title">ARCore</string>
+    <string name="hud_waiting">— waiting for frame</string>
+    <string name="hud_tracking">TRACKING</string>
+    <string name="hud_details">pos  %1$.3f, %2$.3f, %3$.3f m\nquat %4$.3f, %5$.3f, %6$.3f, %7$.3f\nyaw %8$.1f°  pitch %9$.1f°  roll %10$.1f°\nfwd  %11$.2f, %12$.2f, %13$.2f   lag %14$.0f ms   zoom %15$.1fx\nfov  %16$.1f° x %17$.1f°   %18$d x %19$d   fx %20$.0f</string>
 </resources>

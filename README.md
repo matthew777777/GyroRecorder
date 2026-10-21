@@ -18,6 +18,10 @@ adb shell am start -n com.matthew.gyrorecorder/.MainActivity
 Release is signed with the local debug key (same convention as PerfOverlay's
 `releaseLocal`) so it installs with no secrets; it is not a Play upload build.
 
+Tests: `./gradlew :app:testReleaseUnitTest` (PoseMath/FOV unit tests) and, with
+a phone attached, `./gradlew :app:connectedAndroidTest` (injected-pinch zoom
+device test; on Xiaomi, allow the test-APK install prompt if it appears).
+
 Sessions land in `Android/data/com.matthew.gyrorecorder/files/Pantheon/<time>_<scenario>/`
 (also: **Share last** button zips a session). Pull with:
 
@@ -40,7 +44,7 @@ test capture) can be audited per device before joining on `timestamp_ns`.
 
 | File | Contents |
 |---|---|
-| `session.json` | device, sensors, scenario, notes, `sensorOrientationDeg`, gyro mapper version |
+| `session.json` | device, sensors, scenario, notes, `sensorOrientationDeg`, gyro mapper version, plus a `camera` block for scene replication (ARCore camera config: id/facing/CPU+GPU stream sizes/fps range; Camera2: focal length mm, sensor size mm, pixel array) and `cameraIntrinsicsFirstFrame` (image + texture intrinsics with computed h/v/diagonal FOV) |
 | `frames.csv` | per ARCore frame: pose `tx,ty,tz,qx,qy,qz,qw` (world), intrinsics `fx,fy,cx,cy` + image size for that frame, tracking state, `host_elapsed_ns` (clock audit: frame ts lags host by exposure age) |
 | `gyro.csv` | gyro rad/s, device frame (`wx..wz`) + camera frame (`cam_wx..cam_wz`, RawLens `GyroCameraFrameMapper` v1: stored-image X right / Y down / Z into scene) |
 | `accel.csv` | accelerometer m/s², device frame, incl. gravity |
@@ -68,6 +72,8 @@ Every external API/claim above maps to a public source; URLs checked live 2026-1
 |---|---|
 | `Session.update()` → `Frame`, camera pose, tracking state | [ARCore Frame reference](https://developers.google.com/ar/reference/java/com/google/ar/core/Frame), [Camera reference](https://developers.google.com/ar/reference/java/com/google/ar/core/Camera), [Session reference](https://developers.google.com/ar/reference/java/com/google/ar/core/Session) |
 | Per-frame `fx, fy, cx, cy`, image dimensions | [ARCore CameraIntrinsics reference](https://developers.google.com/ar/reference/java/com/google/ar/core/CameraIntrinsics) |
+| Camera config (id, facing, stream sizes, fps range) in `session.json` | [ARCore CameraConfig reference](https://developers.google.com/ar/reference/java/com/google/ar/core/CameraConfig) |
+| Physical focal length / sensor size / pixel array in `session.json` | [CameraCharacteristics reference](https://developer.android.com/reference/android/hardware/camera2/CameraCharacteristics) |
 | Pose translation + rotation quaternion `(x, y, z, w)` | [ARCore Pose reference](https://developers.google.com/ar/reference/java/com/google/ar/core/Pose) |
 | ARCore supported-device / availability checks | [ARCore supported devices](https://developers.google.com/ar/devices) |
 | Camera-background rendering (`setCameraTextureName`, `transformCoordinates2d`) | [google-ar/arcore-android-sdk Hello AR sample](https://github.com/google-ar/arcore-android-sdk/tree/master/samples/hello_ar_kotlin) |
@@ -93,3 +99,7 @@ recorded session confirms 404 Hz gyro/accel delivery. Re-check per device.
 - The gyro->camera-frame mapping uses the first back camera's
   `SENSOR_ORIENTATION`; on multi-back-camera devices where ARCore picks a
   different physical camera, validate with the Pan/tilt sign check first.
+- Pinch zoom is a **simulated** digital zoom: ARCore owns the camera and
+  exposes no optical-zoom control, so the preview centre-crops and
+  `session.json` records `zoomFactor`. Native intrinsics stay in
+  `frames.csv`; effective focal lengths are `fx * zoomFactor` etc.

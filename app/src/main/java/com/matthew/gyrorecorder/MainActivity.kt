@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package com.matthew.gyrorecorder
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -10,6 +11,9 @@ import android.opengl.GLSurfaceView
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.Surface
 import android.view.View
 import android.widget.TextView
@@ -47,6 +51,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusTitle: TextView
     private lateinit var timerView: TextView
     private lateinit var statsView: TextView
+    private lateinit var hudStateView: TextView
+    private lateinit var hudView: TextView
     private lateinit var sparkView: SparkView
     private lateinit var notesField: TextInputEditText
     private lateinit var recButton: MaterialButton
@@ -76,6 +82,7 @@ class MainActivity : AppCompatActivity() {
         glView.setEGLContextClientVersion(2)
         glView.setRenderer(renderer)
         glView.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+        setupPinchZoom()
 
         chipGroup = findViewById(R.id.chipGroup)
         hintView = findViewById(R.id.hintView)
@@ -84,6 +91,8 @@ class MainActivity : AppCompatActivity() {
         statusTitle = findViewById(R.id.statusTitle)
         timerView = findViewById(R.id.timerView)
         statsView = findViewById(R.id.statsView)
+        hudStateView = findViewById(R.id.hudStateView)
+        hudView = findViewById(R.id.hudView)
         sparkView = findViewById(R.id.sparkView)
         sparkView.recorder = recorder
         notesField = findViewById(R.id.notesField)
@@ -122,6 +131,34 @@ class MainActivity : AppCompatActivity() {
         return 90 to false
     }
 
+    /** Pinch = simulated digital zoom (1x..8x) for the preview; double-tap resets to 1x. */
+    // GLSurfaceView has no click semantics; performClick() is still called on tap-up above.
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupPinchZoom() {
+        val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                setZoom(renderer.zoomFactor * detector.scaleFactor)
+                return true
+            }
+        })
+        val tapDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDoubleTap(e: MotionEvent): Boolean { setZoom(1f); return true }
+        })
+        glView.setOnTouchListener { v, event ->
+            scaleDetector.onTouchEvent(event)
+            tapDetector.onTouchEvent(event)
+            if (event.actionMasked == MotionEvent.ACTION_UP && event.pointerCount == 1) v.performClick()
+            true
+        }
+    }
+
+    private fun setZoom(z: Float) {
+        val clamped = z.coerceIn(1f, 8f)
+        renderer.zoomFactor = clamped
+        recorder?.zoomFactor = clamped
+        refreshHud()
+    }
+
     private fun selectScenario(name: String) {
         scenario = name
         hintView.text = SCENARIOS.firstOrNull { it.first == name }?.second ?: ""
@@ -136,7 +173,7 @@ class MainActivity : AppCompatActivity() {
             recButton.text = getString(R.string.record)
             toast("Saved ${dir?.name} — ${r.stats.gyro} gyro, ${r.stats.frames} frames")
         } else {
-            val dir = r.start(scenario, notesField.text?.toString() ?: "")
+            val dir = r.start(scenario, notesField.text?.toString() ?: "", CameraInfo.build(this, session))
             if (dir == null) { toast("Could not create session dir"); return }
             markButton.isEnabled = true
             recButton.text = getString(R.string.stop)
@@ -162,6 +199,27 @@ class MainActivity : AppCompatActivity() {
             statsView.text = getString(R.string.stats_idle, packageName)
         }
         sparkView.invalidate()
+        refreshHud()
+    }
+
+    private fun refreshHud() {
+        val h = recorder?.hud ?: return
+        if (!h.seen) {
+            hudStateView.text = getString(R.string.hud_waiting)
+            hudView.text = ""
+            return
+        }
+        val tracking = h.tracking == "TRACKING"
+        hudStateView.text = if (tracking) getString(R.string.hud_tracking)
+            else if (h.failure.isNotEmpty()) "${h.tracking} / ${h.failure}" else h.tracking
+        hudStateView.setTextColor(getColor(if (tracking) R.color.sage else R.color.bad))
+        hudView.text = getString(
+            R.string.hud_details,
+            h.tx, h.ty, h.tz, h.qx, h.qy, h.qz, h.qw,
+            h.yawDeg, h.pitchDeg, h.rollDeg,
+            h.fwdX, h.fwdY, h.fwdZ, h.lagMs, renderer.zoomFactor,
+            h.fovH, h.fovV, h.imgW, h.imgH, h.fx
+        )
     }
 
     private fun shareLast() {
@@ -250,7 +308,7 @@ class MainActivity : AppCompatActivity() {
             "One hand" to "One-handed grip: same slow pan / tilt / roll. Note hand in Notes.",
             "Static" to "Phone flat and untouched 10 s. Gyro noise floor / bias reference.",
             "Pan/tilt sign check" to "From still: pan RIGHT 5 s, back; tilt DOWN 5 s, back. Validates gyro axis signs.",
-            "Zoom" to "Set max zoom if your camera allows, repeat the pan. Warp ≈ pure rotation here.",
+            "Zoom" to "Pinch the preview to zoom (double-tap resets), then Record and repeat the pan. Warp ≈ pure rotation here.",
             "Custom" to "Free-form. Describe the motion in Notes.",
         )
     }

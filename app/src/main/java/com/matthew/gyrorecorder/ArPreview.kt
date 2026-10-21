@@ -21,6 +21,8 @@ import javax.microedition.khronos.opengles.GL10
 class ArRenderer(private val onFrame: (Frame) -> Unit) : GLSurfaceView.Renderer {
     @Volatile var session: Session? = null
     @Volatile var rotation = 0
+    /** Simulated digital zoom (center crop of the camera texture), 1.0 = native FOV. */
+    @Volatile var zoomFactor: Float = 1f
     @Volatile var viewWidth = 0
     @Volatile var viewHeight = 0
     private var textureId = -1
@@ -33,6 +35,7 @@ class ArRenderer(private val onFrame: (Frame) -> Unit) : GLSurfaceView.Renderer 
     private var appliedRotation = -1
     private var appliedWidth = -1
     private var appliedHeight = -1
+    private var appliedZoom = -1f
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(0f, 0f, 0f, 1f)
@@ -79,9 +82,17 @@ class ArRenderer(private val onFrame: (Frame) -> Unit) : GLSurfaceView.Renderer 
                 appliedRotation = rotation; appliedWidth = viewWidth; appliedHeight = viewHeight
             }
             val frame = s.update()
-            if (geometryDirty || frame.hasDisplayGeometryChanged()) {
+            val zoomDirty = zoomFactor != appliedZoom
+            if (geometryDirty || zoomDirty || frame.hasDisplayGeometryChanged()) {
                 // Remap NDC quad -> camera UVs for the current display geometry.
                 frame.transformCoordinates2d(Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES, QUAD, Coordinates2d.TEXTURE_NORMALIZED, transformedUv)
+                if (zoomFactor != 1f) {
+                    // Simulated zoom: shrink the sampled region around the centre.
+                    for (i in transformedUv.indices) {
+                        transformedUv[i] = 0.5f + (transformedUv[i] - 0.5f) / zoomFactor
+                    }
+                }
+                appliedZoom = zoomFactor
                 quadUv?.apply { clear(); put(transformedUv); rewind() }
             }
             GLES20.glUseProgram(program)

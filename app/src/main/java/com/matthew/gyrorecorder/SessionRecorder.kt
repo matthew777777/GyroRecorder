@@ -67,6 +67,26 @@ class SessionRecorder(
     private val accelSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     private val rotVecSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
 
+    /** Live ARCore pose for the on-screen HUD; updated for every frame, recording or not. */
+    data class Hud(
+        val seen: Boolean = false,
+        val tracking: String = "-",
+        val failure: String = "",
+        val tx: Float = 0f, val ty: Float = 0f, val tz: Float = 0f,
+        val qx: Float = 0f, val qy: Float = 0f, val qz: Float = 0f, val qw: Float = 1f,
+        val yawDeg: Double = 0.0, val pitchDeg: Double = 0.0, val rollDeg: Double = 0.0,
+        val fwdX: Float = 0f, val fwdY: Float = 0f, val fwdZ: Float = 0f,
+        val fx: Float = 0f, val fy: Float = 0f,
+        val imgW: Int = 0, val imgH: Int = 0,
+        val fovH: Double = 0.0, val fovV: Double = 0.0,
+        val lagMs: Double = 0.0,
+    )
+
+    @Volatile var hud = Hud(); private set
+
+    /** Simulated digital zoom set by pinch before/during recording; stored in session.json. */
+    @Volatile var zoomFactor: Float = 1f
+
     @Volatile var stats = Stats(); private set
     @Volatile var sessionDir: File? = null; private set
     private var thread: HandlerThread? = null
@@ -144,7 +164,11 @@ class SessionRecorder(
         }
     }
 
-    fun start(scenario: String, notes: String): File? {
+    private var metaJson: JSONObject? = null
+    private var metaFile: File? = null
+    private var intrinsicsWritten = false
+
+    fun start(scenario: String, notes: String, cameraInfo: JSONObject? = null): File? {
         if (running) return sessionDir
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val slug = scenario.lowercase(Locale.US).replace(Regex("[^a-z0-9]+"), "_").trim('_')
@@ -182,7 +206,7 @@ class SessionRecorder(
         if (!ok) Log.w(TAG, "no IMU registered — ARCore-only session")
 
         val meta = JSONObject().apply {
-            put("app", "GyroRecorder 1.0.0"); put("scenario", scenario); put("notes", notes)
+            put("app", "GyroRecorder " + BuildConfig.VERSION_NAME); put("scenario", scenario); put("notes", notes)
             put("startWallTimeMs", startWallMs); put("t0ElapsedRealtimeNs", t0Ns)
             put("timestampDomain", "boot-time ns: SensorEvent/elapsedRealtime documented; ARCore Frame capture ns (audit via frames.host_elapsed_ns)")
             put("device", "${Build.MANUFACTURER} ${Build.MODEL}"); put("androidSdk", Build.VERSION.SDK_INT)
@@ -190,9 +214,15 @@ class SessionRecorder(
             put("gyroMapperVersion", GyroCameraFrameMapper.MAPPER_VERSION)
             put("gyroSensor", gyroSensor?.name ?: "none"); put("accelSensor", accelSensor?.name ?: "none")
             put("gyroMaxHz", (gyroSensor?.minDelay?.let { if (it > 0) 1e6 / it else 0.0 } ?: 0.0))
+            put("zoomFactor", zoomFactor.toDouble())
+            put("zoomType", "simulated_digital_center_crop (preview only); frames.csv intrinsics are native — effective fx = fx * zoomFactor, fy likewise, principal point unchanged")
             put("hint", "shift_x_px = fx*dry_rad, shift_y_px = -fy*drx_rad per frame_motion.csv")
+            cameraInfo?.let { put("camera", it) }
         }
-        File(dir, "session.json").writeText(meta.toString(2))
+        metaJson = meta
+        metaFile = File(dir, "session.json")
+        intrinsicsWritten = false
+        metaFile?.writeText(meta.toString(2))
         publishStats(); return dir
     }
 
@@ -206,8 +236,9 @@ class SessionRecorder(
 
     @Volatile private var lastFrameTs = -1L
 
-    /** Called on the GL thread for every ARCore frame. No-op when not recording. */
+    /** Called on the GL thread for every ARCore frame; always refreshes the HUD. */
     fun onArFrame(frame: Frame) {
+        updateHud(frame)
         if (!running) return
         // session.update() can hand back the same image twice; log each exposure once.
         if (frame.timestamp == lastFrameTs) return
@@ -217,6 +248,20 @@ class SessionRecorder(
         val q = FloatArray(4); pose.getRotationQuaternion(q, 0)
         val intr = cam.imageIntrinsics
         val f = intr.focalLength; val p = intr.principalPoint; val d = intr.imageDimensions
+        if (!intrinsicsWritten) {
+            intrinsicsWritten = true
+            try {
+                val tex = cam.textureIntrinsics
+                val tf = tex.focalLength; val tp = tex.principalPoint; val td = tex.imageDimensions
+                metaJson?.put("cameraIntrinsicsFirstFrame", JSONObject().apply {
+                    put("image", CameraInfo.intrinsicsBlock(f[0], f[1], p[0], p[1], d[0], d[1]))
+                    put("texture", CameraInfo.intrinsicsBlock(tf[0], tf[1], tp[0], tp[1], td[0], td[1]))
+                })
+                metaFile?.writeText(metaJson.toString())
+            } catch (e: Exception) {
+                Log.w(TAG, "intrinsics metadata failed: ${e.message}")
+            }
+        }
         val idx = frameCount.incrementAndGet() - 1
         val host = SystemClock.elapsedRealtimeNanos()
         lastTracking = cam.trackingState.name
@@ -234,6 +279,30 @@ class SessionRecorder(
         }
         if (cam.trackingState != TrackingState.TRACKING) lastTracking = "${cam.trackingState}/${cam.trackingFailureReason}"
         publishStats()
+    }
+
+    private fun updateHud(frame: Frame) {
+        val cam = frame.camera
+        val pose = cam.pose
+        val q = FloatArray(4); pose.getRotationQuaternion(q, 0)
+        val (yaw, pitch, roll) = PoseMath.eulerYXZDegrees(q[0], q[1], q[2], q[3])
+        val fwd = PoseMath.forward(q[0], q[1], q[2], q[3])
+        val intr = cam.imageIntrinsics
+        val host = SystemClock.elapsedRealtimeNanos()
+        val dims = intr.imageDimensions
+        val (fovH, fovV, _) = PoseMath.fovDegrees(intr.focalLength[0], intr.focalLength[1], dims[0], dims[1])
+        hud = Hud(
+            seen = true,
+            tracking = cam.trackingState.name,
+            failure = if (cam.trackingState == TrackingState.TRACKING) "" else cam.trackingFailureReason.name,
+            tx = pose.tx(), ty = pose.ty(), tz = pose.tz(),
+            qx = q[0], qy = q[1], qz = q[2], qw = q[3],
+            yawDeg = yaw, pitchDeg = pitch, rollDeg = roll,
+            fwdX = fwd.first, fwdY = fwd.second, fwdZ = fwd.third,
+            fx = intr.focalLength[0], fy = intr.focalLength[1],
+            imgW = dims[0], imgH = dims[1], fovH = fovH, fovV = fovV,
+            lagMs = (host - frame.timestamp) / 1e6,
+        )
     }
 
     fun mark(label: String) {
